@@ -1,0 +1,6 @@
+[package]
+name = "space_email_scraper"
+version = "0.1.0"
+authors = ["AlphaModder <quasiflux@gmail.com>"]
+
+[dependencies]

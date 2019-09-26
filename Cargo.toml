@@ -1,6 +1,13 @@
 [package]
 name = "space_email_scraper"
 version = "0.1.0"
-authors = ["AlphaModder <quasiflux@gmail.com>"]
+authors = ["AlphaModder"]
+edition = "2018"
 
 [dependencies]
+space_email_api = "0.1.1"
+structopt = "0.3.2"
+structopt-derive = "0.1.0"
+regex = "1.3.1"
+chrono = "0.3"
+nom = "5.0.1"

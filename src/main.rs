@@ -1,9 +1,8 @@
 mod args;
-mod args2;
 mod filter;
 
 use space_email_api::*;
-use args::Arguments;
+use args::Args;
 use std::cell::RefCell;
 use std::collections::HashSet;
 

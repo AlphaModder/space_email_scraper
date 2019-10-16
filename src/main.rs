@@ -9,86 +9,88 @@ mod args;
 
 use args::Args;
 
-pub static RECONNECT_FAILURE_MSG: &str = "Failed to reconnect to Space Email.";
-pub static DISCONNECT_MSG: &str = "Space Email is not responding. Will reconnect when possible.";
-
-struct Context {
+struct SpaceEmailScraper {
     args: Args,
     client: SpaceEmailClient,
     emails: HashSet<SpaceEmail>,
     searched: usize,
+    connected: bool,
+    retries: usize,
 }
 
-#[derive(PartialEq, Eq)]
-enum State {
-    Scraping(usize, &'static str),
-    Waiting(usize),
-    Disconnected,
-    Exiting,
+impl SpaceEmailScraper {
+    fn scrape_with(args: Args) {
+        SpaceEmailScraper {
+            retries: args.retries,
+            args: args,
+            client: SpaceEmailClient::new(),
+            emails: HashSet::new(),
+            searched: 0,
+            connected: true,
+        }.scrape();
+    }
 }
 
-impl State {
-    fn advance(self, ctx: &mut Context) -> State {
-        match self {
-            State::Scraping(retries, dc_msg) => {
-                match ctx.client.get_random() {
-                    Ok(email) => {
-                        ctx.searched += 1;
-                        if ctx.args.filter(&email) { ctx.emails.insert(email); }
-                        match ctx.args.should_continue(ctx.searched, ctx.emails.len()) {
-                            true => State::Waiting(ctx.args.retries),
-                            false => State::Exiting,
-                        }
-                    }
-                    Err(_) => match (retries, ctx.args.no_reconnect) {
-                        (0, false) => {
-                            println!("{}", dc_msg);
-                            State::Disconnected
-                        }
-                        (0, true) => {
-                            println!("Space Email is not responding. Aborting.");
-                            State::Exiting
-                        }
-                        _ => {
-                            println!("Failed to reach Space Email. Retrying.");
-                            State::Waiting(retries - 1)
-                        }
+impl SpaceEmailScraper {
+    fn scrape(&mut self) {
+        loop {
+            match self.client.get_random() {
+                Ok(email) => {
+                    if !self.connected { println!("Reconnected to Space Email."); }
+                    self.connected = true;
+                    self.searched += 1;
+                    self.retries = self.args.retries;
+                    if self.args.filter(&email) { self.save_email(email); }
+                    match self.args.should_continue(self.searched, self.emails.len()) {
+                        true => SpaceEmailScraper::wait_ms(self.args.cooldown_ms),
+                        false => self.exit(),
                     }
                 }
-            },
-            State::Waiting(tries) => {
-                thread::sleep(Duration::from_millis(ctx.args.cooldown_ms));
-                State::Scraping(tries, DISCONNECT_MSG)
-            }
-            State::Disconnected => {
-                thread::sleep(Duration::from_millis(ctx.args.reconnect_ms));
-                let new_state = State::Scraping(1, RECONNECT_FAILURE_MSG).advance(ctx);
-                if new_state != State::Disconnected { println!("Reconnected to Space Email.") }
-                new_state
-            }
-            State::Exiting => {
-                let mut code = -1;
-                if ctx.emails.len() == ctx.args.emails {
-                    println!("Finished downloading emails.");
-                    code = 0;
-                }
-                else if ctx.searched == ctx.args.max_volume {
-                    println!("Reached maximum search volume.");
-                    code = 0;
-                }
-                std::process::exit(code)
+                Err(_) => self.handle_error(),
             }
         }
+    }
+
+    fn save_email(&mut self, email: SpaceEmail) {
+        self.emails.insert(email);
+    }
+
+    fn wait_ms(ms: u64) {
+        if ms != 0 { thread::sleep(Duration::from_millis(ms)); }
+    }
+
+    fn handle_error(&mut self) {
+        if self.retries > 0 {
+            self.retries -= 1;
+            println!("Failed to reach Space Email. Retrying.");
+            SpaceEmailScraper::wait_ms(self.args.cooldown_ms);
+        } else { // disconnected
+            let msg = match (self.args.no_reconnect, self.connected) {
+                (true, _) => ("Space Email is not responding. Aborting."),
+                (false, true) => ("Space Email is not responding. Will reconnect when possible."),
+                (false, false) => ("Failed to reconnect to Space Email."),
+            };
+
+            println!("{}", msg);
+            if self.args.no_reconnect { self.exit(); }
+            SpaceEmailScraper::wait_ms(self.args.reconnect_ms);
+        }
+    }
+
+    fn exit(&mut self) -> ! {
+        let mut code = -1;
+        if self.emails.len() == self.args.emails {
+            println!("Finished downloading emails.");
+            code = 0;
+        }
+        else if self.searched == self.args.max_volume {
+            println!("Reached maximum search volume.");
+            code = 0;
+        }
+        std::process::exit(code)
     }
 }
 
 fn main() {
-    let mut ctx = Context {
-        args: Args::from_args(),
-        client: SpaceEmailClient::new(),
-        emails: HashSet::new(),
-        searched: 0,
-    };
-    let mut state = State::Scraping(ctx.args.retries, DISCONNECT_MSG);
-    loop { state = state.advance(&mut ctx); }
+    SpaceEmailScraper::scrape_with(Args::from_args());
 }
